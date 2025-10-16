@@ -1,18 +1,17 @@
-// server.js (ESM)
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const app = express();
 
-// Resolve __dirname in ESM
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Serve static files from ./public (index.html at /)
+
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Progress stream with named events: /progress/:jobId
+
 app.get('/progress/:jobId', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');

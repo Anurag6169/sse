@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SSE — Basic Example</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+      #out { white-space: pre; background: #111; color: #eee; padding: 1rem; border-radius: 8px; max-height: 50vh; overflow: auto; }
+      button { margin-right: .5rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Server‑Sent Events — Basic</h1>
+    <p>Streams a JSON “tick” every second from <code>/events</code>.</p>
+
+    <div>
+      <button id="connect">Connect</button>
+      <button id="disconnect">Disconnect</button>
+      <span id="status">disconnected</span>
+    </div>
+
+    <div id="out"></div>
+
+    <script>
+      const out = document.getElementById('out');
+      const statusEl = document.getElementById('status');
+      const connectBtn = document.getElementById('connect');
+      const disconnectBtn = document.getElementById('disconnect');
+
+      let es = null;
+
+      function log(line) {
+        out.textContent += line + '\n';
+        out.scrollTop = out.scrollHeight;
+      }
+
+      function connect() {
+        if (es) es.close();
+        // Same-origin path; no CORS required
+        es = new EventSource('/events');
+        statusEl.textContent = 'connecting…';
+
+        es.onopen = () => {
+          statusEl.textContent = 'connected';
+          log('open');
+        };
+
+        es.onmessage = (evt) => {
+          // Default event with data payload
+          const data = JSON.parse(evt.data);
+          log(`tick #${data.i} @ ${new Date(data.ts).toLocaleTimeString()}`);
+        };
+
+        es.onerror = () => {
+          // Browser will auto-reconnect; keep it simple for first demo
+          statusEl.textContent = 'reconnecting…';
+          log('error (auto-retry)');
+        };
+      }
+
+      function disconnect() {
+        if (es) {
+          es.close();
+          es = null;
+          statusEl.textContent = 'disconnected';
+          log('closed');
+        }
+      }
+
+      connectBtn.addEventListener('click', connect);
+      disconnectBtn.addEventListener('click', disconnect);
+
+      // Auto-connect on load for a smooth demo
+      connect();
+    </script>
+  </body>
+</html>

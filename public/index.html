@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SSE — Progress Only</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+      #out { white-space: pre; background: #111; color: #eee; padding: 1rem; border-radius: 8px; max-height: 50vh; overflow: auto; }
+      button { margin-right: .5rem; }
+      .row { margin: .25rem 0; }
+      progress { width: 320px; height: 18px; }
+    </style>
+  </head>
+  <body>
+    <h1>Server‑Sent Events — Job Progress</h1>
+
+    <label>
+      Job ID:
+      <input id="jobId" value="42" size="8" />
+    </label>
+    <div>
+      <button id="start">Start Job</button>
+      <button id="stop">Stop</button>
+      <span id="status">idle</span>
+    </div>
+
+    <div style="margin-top: 1rem;">
+      <progress id="bar" value="0" max="100"></progress>
+      <span id="pct">0%</span>
+    </div>
+
+    <div id="out"></div>
+
+    <script>
+      const jobIdEl = document.getElementById('jobId');
+      const startBtn = document.getElementById('start');
+      const stopBtn = document.getElementById('stop');
+      const statusEl = document.getElementById('status');
+      const out = document.getElementById('out');
+      const bar = document.getElementById('bar');
+      const pctText = document.getElementById('pct');
+
+      let es = null;
+
+      function log(line) {
+        out.textContent += line + '\n';
+        out.scrollTop = out.scrollHeight;
+      }
+
+      startBtn.addEventListener('click', () => {
+        const jobId = jobIdEl.value.trim() || '42';
+        if (es) es.close();
+        es = new EventSource(`/progress/${encodeURIComponent(jobId)}`);
+        statusEl.textContent = 'running…';
+        bar.value = 0; pctText.textContent = '0%'; out.textContent = '';
+
+        es.addEventListener('progress', (e) => {
+          const { jobId, pct } = JSON.parse(e.data);
+          bar.value = pct; pctText.textContent = pct + '%';
+          log(`Job ${jobId}: ${pct}%`);
+        });
+
+        es.addEventListener('done', (e) => {
+          const { jobId } = JSON.parse(e.data);
+          statusEl.textContent = 'done';
+          bar.value = 100; pctText.textContent = '100%';
+          log(`Job ${jobId}: complete`);
+          es.close(); es = null;
+        });
+
+        es.onerror = () => {
+          statusEl.textContent = 'reconnecting…';
+          log('error (auto‑retry)');
+        };
+      });
+
+      stopBtn.addEventListener('click', () => {
+        if (es) { es.close(); es = null; statusEl.textContent = 'stopped'; log('stopped'); }
+      });
+    </script>
+  </body>
+</html>

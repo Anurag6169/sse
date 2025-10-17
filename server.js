@@ -1,47 +1,103 @@
-// server.js (CommonJS)
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
+const COUNTER_FILE = path.join(__dirname, 'event-counter.txt');
 
-// Serve static files from ./public (index.html at /)
+
+function loadEventCounter() {
+  try {
+    if (fs.existsSync(COUNTER_FILE)) {
+      const val = fs.readFileSync(COUNTER_FILE, 'utf8').trim();
+      const num = parseInt(val, 10);
+      if (!isNaN(num)) return num;
+    }
+  } catch {}
+  return 0;
+}
+function saveEventCounter(n) {
+  try { fs.writeFileSync(COUNTER_FILE, n.toString(), 'utf8'); }
+  catch (e) { console.error('Save counter error', e); }
+}
+
+
+function makeRingBuffer(size = 200) {
+  const buf = new Array(size);
+  let head = 0, maxId = 0;
+  return {
+    push(data, id) {
+      const item = { id, data };
+      buf[head] = item;
+      head = (head + 1) % size;
+      maxId = Math.max(maxId, id);
+      return item;
+    },
+    replayFrom(lastId, writer) {
+      const items = [];
+      buf.forEach(it => { if (it && it.id > lastId) items.push(it); });
+      items.sort((a,b)=>a.id-b.id);
+      items.forEach(writer);
+    }
+  };
+}
+
+const logBuffer = makeRingBuffer(300);
+let globalEventCounter = loadEventCounter();
+
+
 app.use(express.static(path.join(__dirname, 'public')));
 
-// SSE log stream with optional severity filter: /logs?level=info|warn|error|debug
 app.get('/logs', (req, res) => {
-  // Required SSE headers
-  res.setHeader('Content-Type', 'text/event-stream'); // parse as SSE
-  res.setHeader('Cache-Control', 'no-cache');          // avoid buffering
-  res.setHeader('Connection', 'keep-alive');           // keep TCP open (helpful)
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.write('retry: 3000\n\n');
 
-  // Severity ordering for filtering
-  const levels = ['debug', 'info', 'warn', 'error'];
-  const min = (req.query.level || 'info').toString();
+  const levels = ['debug','info','warn','error'];
+  const min = (req.query.level||'info').toString();
+  const lastId = Number(req.get('Last-Event-ID')||0);
 
-  let i = 0;
-  // Emit a new log record every ~700ms, rotating levels
-  const t = setInterval(() => {
-    const level = levels[i++ % levels.length];
-    const record = { ts: Date.now(), level, msg: `event ${i}` };
 
-    // Only stream records meeting the minimum level threshold
-    if (levels.indexOf(level) >= levels.indexOf(min)) {
-      // SSE frame: one or more data: lines, then a blank line terminator
-      res.write(`data: ${JSON.stringify(record)}\n\n`);
+
+  logBuffer.replayFrom(lastId, item => {
+    res.write(`id: ${item.id}\n`);
+    res.write(`data: ${JSON.stringify(item.data)}\n\n`);
+  });
+
+
+  const hb = setInterval(() => res.write(': ping\n\n'),20000);
+
+
+  const live = setInterval(() => {
+    globalEventCounter++;
+    const lvl = levels[(globalEventCounter-1)%levels.length];
+    const rec = { ts: Date.now(), level:lvl, msg:`event ${globalEventCounter}` };
+    const item = logBuffer.push(rec, globalEventCounter);
+    if (levels.indexOf(lvl)>=levels.indexOf(min)) {
+      res.write(`id: ${item.id}\n`);
+      res.write(`data: ${JSON.stringify(rec)}\n\n`);
     }
-  }, 700);
+    if (globalEventCounter%10===0) saveEventCounter(globalEventCounter);
+  },700);
 
-  // Heartbeat comment to keep intermediaries from timing out idle streams
-  const hb = setInterval(() => res.write(': ping\n\n'), 20000);
-
-  // Cleanup when client disconnects
-  req.on('close', () => {
-    clearInterval(t);
+  req.on('close',()=>{
     clearInterval(hb);
+    clearInterval(live);
+    saveEventCounter(globalEventCounter);
+    console.log('Client disconnected');
   });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`SSE logs demo at http://localhost:${PORT}`);
+
+process.on('SIGINT',()=>{
+  saveEventCounter(globalEventCounter);
+  process.exit();
 });
+process.on('SIGTERM',()=>{
+  saveEventCounter(globalEventCounter);
+  process.exit();
+});
+
+const PORT=3000;
+app.listen(PORT,()=> console.log(`Listening on http://localhost:${PORT}`));
